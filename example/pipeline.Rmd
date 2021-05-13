@@ -1,0 +1,492 @@
+---
+title: "Pipeline"
+output:
+  html_document:
+    fig_width: 9
+    fig_height: 8
+    fig_caption: yes
+    code_folding: hide
+  pdf_document: default
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set( echo = TRUE, code_folding='hide')   
+```
+
+## Load simulation data
+
+```{r echo=TRUE}
+library(FFT)
+library(PTA)
+library(leiden) 
+cluLeiden = NULL
+load("../../LISA2new/data/simulation_res.RData")
+```
+
+## Analysis pipeline {.tabset}
+ 
+### 1. PCA
+1. With normalized data as input, do PCA first
+2. We select top principle components (PCs): 
+   (1) Compute the derivative of the standard deviations of the principal components.
+   (2) Apply linear regression on the PC number and the derivative. Compute the squared error of the predicted derivative and input derivative. 
+   (3) Compute the median value of the top 100 values in the predicted squared error.  
+   (4) Use the median value as the mean and standard variance of normal distribution. We use right tailed test (p-value > 1 - 0.05) to select the top PCs based on the predicted squared error. 
+```{r echo=TRUE}
+if(is.null(pcd)){
+  pcd = pcaL1(data=daC, pvalue=0.05, pcaSel = 1,  sel=2, center=TRUE, scale=FALSE, ith=1e-2) 
+}   
+
+if(is.null(Z)){
+  nc = getPCAN(pcd$pca_out,pvalue=0.05, sel=2, ith=1e-2)
+  Z = pcd$pca_out$x[,1:nc] 
+} 
+dim(Z) 
+``` 
+
+### 2. UMAP
+Compute UMAP using the selected PCs.
+```{r echo=TRUE }
+library(plotly)
+# For plot 
+set.seed(1)
+if(is.null(uY)){
+  emb2 <-  umap::umap(Z)
+  uY = emb2$layout
+}
+plotAlls(X=uY,draw=1, t=NULL, cluid=as.character(branch),
+         type=2,size =6,opacity=1, titlename=paste0("UMAP: PC number = ", ncol(Z)))
+
+```  
+
+### 3. Clustering
+1. We set k from 4 to 20 to build corresponding kNN graph
+2. For each kNN graph, we apply community detection (Leiden or Louvain) algorithm for clustering the cells
+3. User can visualize all clustering results in UMAP and select a proper clustering results
+```{r echo=TRUE }
+ks = seq(4,20, by=2)
+if(is.null(cluLeiden)){
+  tclu3 = proc.time()
+  cluLeiden = list()
+  #setLeignPath()
+  for(i in 1:length(ks)){
+    cluLeiden[[i]] = cmcluster(Z, ksize = ks[i], cmmethod="leiden")
+  }
+  tclu4 = proc.time() - tclu3  
+}
+``` 
+
+Plot clustering
+
+```{r echo=TRUE }
+lp <- htmltools::tagList()
+for (i in 1:length(ks)) { 
+  cluid = cluLeiden[[i]]$cluid
+  table(cluid)
+  p1 = plotAlls(X=uY,draw=1, t=NULL, cluid=as.character(cluid), type=2,size =6,opacity=1,
+         titlename=paste("UMAP,k=", ks[i], sep=""))
+  lp[[i]] <- as.widget(p1)
+}
+lp
+``` 
+
+### 4. Select a proper clustering
+  
+```{r echo=TRUE}
+k=5
+cluid = cluLeiden[[k]]$cluid
+table(cluid)
+plotAlls(X=uY,draw=1, t=NULL, cluid=as.character(cluid), type=2,size =6,opacity=1,
+         titlename=paste("UMAP,k=", ks[k], sep=""))
+
+library("netbiov")
+plotCommNet(Z, ksize=ks[k], cluid, colname= rownames( brewer.pal.info)[12],
+            gtype = "Kamada-Kawai", seedN = 1)
+
+``` 
+
+### 5. Compuate L-ISOMAP
+1. Based on selected clustering, we build kNN graph from corresponding k size
+2. For each cluster, select the the cell which has most connections in kNN graph as landmark points.
+3. Build 3D L-ISOMAP based landmark points and kNN graph
+```{r echo=TRUE}  
+centid = getCluCenterID(Z, cluid)
+peakid = searchPeaks(gg=cluLeiden[[k]]$knng$g, cluid)
+X  <- autoLISOMAP(Z, peaks=peakid, ndim = 3, L1=NULL, L2=NULL, N=1)   
+``` 
+
+Visualize 3D L-ISOMAP 
+```{r echo=TRUE}  
+PZ = rbind(uY, uY[peakid,])
+pc = c(cluid, rep("peaks", length(peakid)))
+plotAlls(X=PZ,draw=1, t=NULL, cluid=as.character(pc), type=2,size =6,opacity=1,
+         titlename=paste("Peaks in UMAP,k=", ks[k], sep="")) 
+#### 4. Visualization
+#plotAlls(X=X,draw=3, t=NULL, cluid=as.character(branch), type=2,size =6,opacity=1, titlename="ISOMAP")
+plotAlls(X=X,draw=3, t=NULL, cluid=as.character(cluid), type=2,size =5,opacity=1, titlename="ISOMAP") 
+``` 
+
+### 6. Trajectory anlysis 
+1. Calculate the neighbor distance matrix and graph distance matrix for the clusters based kNN graph.
+2. User can specify the root cluster and leaf clusters to build a spanning tree.
+   User can organize the leaf structure by list format:
+   For example: leaves=list(a=c(5,7,"parallel"), b=c(8,9,"parallel"), c=c(16,12,"linear"), d=10, f=4)
+   Here, cluster 5 and 7 are derived from cluster 3. Hence, they are parallel. 
+   cluster 8 and 9 are derived from cluster 11. Hence, they are parallel.
+   cluster 12 and 16 are linear connected,  Hence, they are linear.
+   cluster 10 and 4 are separated clusters.
+   
+```{r echo=TRUE}
+##1. Compute neighbor distance of clusters in graph built by PCA  
+msM = getCluNeighbors(Z, k=ks[k], cluid=cluid)
+##2. Compute graph distance matrix
+dsM = distGraphClu(Z, ksize=ks[k], cluid=cluid) 
+``` 
+
+
+```{r echo=TRUE}
+rt = 2 # clu
+g1 = getMSTLeafRootISO_3(neigDist = msM, cenDist=dsM, cluid=cluid, L2=3, root=rt,
+                         leaves=list(a=c(5,7,"parallel"), b=c(8,9,"parallel"),
+                                     c=c(16,12,"linear"), d=10, f=4))
+``` 
+
+### 7. Trajectory visualization 
+1. User can visualize the trajectory by pie tree plot
+```{r echo=TRUE}
+clucells = getCluCellTh(cluid=cluid, branch, th=0.2, subN=10)
+g2 <- set.vertex.attribute(g1$g5, "name", value=clucells)
+ctyM = getCellSM(cluid, branch)
+cellN =  as.character(names(table(branch)))
+
+g3 <- set.vertex.attribute(g1$g5, "name", value= paste("Y_",1:max(cluid),sep=""))
+pieTreeRoot(mst=g3, root=rt, ctyM, cellN, vs=1, ew=1, cex=2, seed=1,colorname="Paired") # Plot the cluster tree 
+``` 
+
+2. User can visualize the trajectory in 3D L-ISOMAP
+```{r echo=TRUE}
+#### Plot 3D trajectory
+plot3DTreeCells(X[,1:3], peaks =NULL, cluid= as.character(cluid), celltype = as.character(branch),
+                colorname="Paired", mst=g1$g5, pointsize = 6,labelsize=15, lineW=10)
+#plot3DTreeCells(X[,1:3], peaks =NULL, cluid= as.character(cluid),colorname="Paired",
+#                celltype = as.character(cluid),mst=g1$g5, pointsize = 6,labelsize=15, lineW=10)
+
+```
+
+3. User can visualize the trajectory by cell cluster tree
+```{r echo=TRUE} 
+####   Plot the tree
+Y <- getCenters(X, cluid)
+cluidS = as.character(cluid)
+anno =  cbind(cluidS, as.character(branch))
+colnames(anno) = c("cluster", "celltype")
+anno = as.data.frame(anno)
+
+g3 <- set.vertex.attribute(g1$g5, "name", value= paste("Y_",1:max(cluid),sep=""))
+#g3 <- set.vertex.attribute(g1, "name", value= paste("Y_",1:max(cluid),sep=""))
+plotCellTree(X=X, uY, cluid=cluid, mst=g3, root=rt, colorby="celltype", anno=anno, height=0.2,
+             width=0.3, pointSize=2, edgeW=0.5, textSize=6, legendTextS=20, legendColS=10, hv=0.5,
+             vv=-1.2, colorName = "Paired")
+```
+
+### 8. Trajectory pseudo time 
+1. User can compute pseudo time by trajectory
+```{r echo=TRUE}
+rt = 2# root
+g2 <- set.vertex.attribute(g1$g5, "name", value= paste("Y_", 1:max(cluid),sep = ""))
+res = simpPTime(Z, cluid=cluid,  cenTree=g2,  root=rt)
+
+# save(a=pcd, b=Z, c=uY, d=cluLeiden, e=X, f=g1, g=branch, h=daC, i=Y, j=res,k=g2, file = "../data/simulation_res.RData")
+
+```
+
+2. User can visualize the pseudo time in UMAP 
+
+```{r echo=TRUE}
+plotAlls(X=uY,draw=1, t=res$pt, cluid=as.character(branch), type=1,size =6,opacity=1, titlename="UMAP")
+#plotAlls(X=X,draw=3, t=res$pt, cluid=as.character(branch), type=1,size =6,opacity=1, titlename="ISOMAP")
+
+```
+
+
+### 9. PTA analysis for each lineage 
+User can apply PTA for each lineage
+1. User should specify each lineage first as input of PTA
+2. To reduce the computation time, user can do average on the cells along the lineage
+
+```{r echo=TRUE}
+lpath1 = c(2,15,11,9)
+lpath2 = c(2,15,11,8)
+lpath3 = c(2,14,13,6,4)
+lpath4 = c(2,14,13,6,3,7)
+lpath5 = c(2,14,13,6,3,5)
+lpath6 = c(2,14,13,1,16,12)
+lpath7 = c(2,14,13,1,10)
+cluid = cluLeiden[[5]]$cluid
+fpath = "../../LISA2new/data/simu_PTA_lineage_1.RData"
+
+if(!file.exists(fpath)){ 
+  usePTA(sd=daC, cluid=cluid, path=lpath1, pt = res$pt, fname=fpath,
+       it = 25, intv = 200, feature.flag = TRUE,
+       err_flag = 1, scale=FALSE, nCores=1) 
+} 
+load(fpath)
+```
+
+### 10. PTA Visulization in rank 1 in lineage c(2,15,11,9)
+ 
+```{r echo=TRUE}
+library(reshape2)
+library(colorRamps)
+library(grid)
+library(gridExtra)
+library(pheatmap)
+singlePath = c(2,15,11,9)
+cid = singlePath
+da = NULL
+for(i in 1:length(cid)){
+  k= which(cluid==cid[i])
+  pt = res$pt[k]
+  od = order(pt)
+  k = k[od]
+  da = cbind(da, daC[,k]) 
+} 
+
+plotHeatMap <- function(da1,tv, fz=20, rowsize = 6, colsize=4,barsize=10, showRname=F, showCname=F,
+                        colname=NULL, title=""){#
+  #cs = colorRampPalette(rev(c("#D73027", "#FC8D59", "#FEE090",
+  #                                                 "#FFFFBF", "#E0F3F8", "#91BFDB", "#4575B4")))(100);
+  if(is.null(colname)){
+    #cs = colorRampPalette(rev(c("#D73027", "#FC8D59", "#FEE090",
+    #                            "#FFFFBF", "#E0F3F8", "#91BFDB", "#4575B4")))(100);
+    cs = colorRampPalette(c("#0392cf","#7bc043", "#fdf498","#ffff66","#ff3300"))(50)
+  }else{#colname="Spectral"
+    cs = colorRampPalette(brewer.pal(brewer.pal.info[colname,1],colname))(100)
+  } 
+  
+  a = pheatmap(da1, color = cs, breaks = NA, scale = "none", cluster_rows = F,
+               cluster_cols = F,   legend = TRUE, annotation = NA,
+               annotation_colors = NA, annotation_legend = TRUE, filename = NA, width = NA, 
+               height = NA, main = title, 
+               show_rownames=showRname,show_colnames=showCname,
+               silent=TRUE, fontsize = fz,fontsize_row = rowsize, fontsize_col = colsize)
+  
+  if(tv[1] < 0){
+    od = order(tv, decreasing = TRUE)
+    tv = tv[od]
+  }else{
+    od = order(tv)
+    tv = tv[od]
+  } 
+  df <- data.frame(top_v=1:length(tv), loadings=tv)
+  p<- ggplot(data=df, aes(x=top_v, y=loadings)) +
+    geom_bar(stat="identity")  + coord_flip() +
+    theme(panel.background = element_blank(), axis.text=element_text(size=barsize),
+          axis.title=element_text(size=barsize,face="bold"),
+          axis.ticks.x=element_blank())+  
+    scale_x_continuous(position = "top") +
+    scale_y_continuous(position = "right")
+  #+ theme_classic()
+  #+ theme_minimal()
+  lm=rbind(c(1,1,1,1,1,2))
+  grid.arrange(grobs = list(a[[4]],p), layout_matrix = lm) 
+  
+}
+
+```
+
+
+
+```{r echo=TRUE}
+str="Main trends in simulation lineage 2->9" 
+feature.flag=TRUE
+
+titlefontSize = 2
+
+# out$uName
+##################all trends
+mout = out
+timevec = 1:nrow(mout$B)
+S1 = mout$B %*% mout$beta
+f1 <- splinefun(timevec, S1)
+T = length(timevec)
+max1 = max(mout$prd) 
+min1 = min(mout$prd)
+
+mout = out$rank2
+S2 = mout$B %*% mout$beta
+f2 <- splinefun(timevec, S2)
+max2 =  max(mout$prd) 
+min2 =  min(mout$prd) 
+
+mout = out$rank3
+S3 = mout$B %*% mout$beta
+f3 <- splinefun(timevec, S3)
+max3 =  max(mout$prd) 
+min3 =  min(mout$prd) 
+
+ymin = min(c(S1,S2,S3))
+ymax = max(c(S1,S2,S3))
+
+vmax = max(max1, max2, max3)
+vmin = min(min1, min2, min3) 
+
+ 
+plot(x= timevec, y= S1, ylim=c(ymin, ymax), type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black", main= str, cex.main= titlefontSize)
+curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
+
+points(x= timevec, y= S2, type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black")
+curve(f2(x), from=timevec[1], to=timevec[T], col="blue", lty=1,lwd=2, add=TRUE)
+
+points(x= timevec, y= S3, type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black")
+curve(f3(x), from=timevec[1], to=timevec[T], col="green", lty=1,lwd=2, add=TRUE)
+par(xpd = T)
+legend(1, ymax+1, title = " ",  legend=c('Rank1','Rank2','Rank3'), 
+       col =  c('red','blue','green'), horiz = F,bty='n',
+       pch = 14,pt.cex = 2,  cex=1.5,ncol= 10 ) 
+
+
+plot(x= timevec, y= S1, ylim=c(ymin, ymax), type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black", main= str, cex.main= titlefontSize)
+curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
+
+points(x= timevec, y= S2, type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black")
+curve(f2(x), from=timevec[1], to=timevec[T], col="blue", lty=1,lwd=2, add=TRUE)
+par(xpd = T)
+legend(1, ymax+4, title = " ",  legend=c('Rank1','Rank2' ), 
+       col =  c('red','blue'), horiz = F,bty='n',
+       pch = 16,pt.cex = 2,  cex=1.5,ncol= 10 ) 
+
+
+PTA.plotCV(err,feature.flag = feature.flag)
+ 
+plot(mout$a[,1],type="p", xlab="genes", ylab="a", lwd=2, font=2)
+ 
+TH1 = 0.03
+corTH = 0 
+mout = out
+na <- c(length(mout$a[mout$a>TH1]), length(mout$a[mout$a<-TH1]),length(mout$a[abs(mout$a)<TH1]) ) 
+names(na) = c(paste('a>',TH1),
+              paste('a<',-TH1),
+              paste('|a|<',TH1) )
+na
+
+gid = 1:length(mout$a)
+uid = gid[mout$a>TH1]
+did = gid[mout$a<-TH1]
+ 
+# up and down expressed marker genes 
+upgene1 = as.character(out$uName[uid])
+downgene1 = as.character(out$uName[did]) 
+
+############################ Plot Trend
+timevec = 1:nrow(mout$B)
+S = mout$B %*% mout$beta
+f1 <- splinefun(timevec, S)
+T = length(timevec)
+plot(x= timevec, y= S, type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black",ylim=range(S), main="Trend")
+curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
+```
+
+```{r echo=TRUE }
+################################ predicted marker
+mout = out
+rownames(mout$prd) = mout$uName 
+nid = which( abs(mout$a[,1]) > TH1)  
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = mout$prd[uid,]   
+plotHeatMap(da1, uWt[od], fz=20, title = "Predicted data gene rank 1") 
+ 
+x = mout$x[,1,]
+rownames(x) = mout$uName 
+nid = which( abs(mout$a[,1]) > TH1)  
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = x[uid,]   
+
+cuWt = uWt[od]
+corS= apply(da1, 1, function(x) {cor(x, S1) }) 
+id  = which(abs(corS)>=corTH) 
+
+plotHeatMap(da1[id,], cuWt[id], fz=20, title = "Raw data gene rank 1") 
+   
+kid = getMapId(rownames(da), rownames(da1[id,]))
+plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 1") 
+
+```  
+
+
+### 11. PTA Visulization in rank 2 in lineage c(2,15,11,9)
+ 
+```{r echo=TRUE }
+TH1 = 0.03
+mout = out$rank2
+
+############################ plot loadings
+PTA.plotCV(out$err2,feature.flag = feature.flag)
+ 
+plot(mout$a[,1],type="p", xlab="genes", ylab="a", lwd=2, font=titlefontSize)
+ 
+na <- c(length(mout$a[mout$a>TH1]), length(mout$a[mout$a<-TH1]),length(mout$a[abs(mout$a)<TH1]) ) 
+names(na) = c(paste('a>',TH1),
+              paste('a<',-TH1),
+              paste('|a|<',TH1) )
+na
+
+
+gid = 1:length(mout$a)
+uid = gid[mout$a>TH1]
+did = gid[mout$a<-TH1]
+ 
+# up and down expressed marker genes 
+upgene2 = as.character(out$uName[uid])
+downgene2 = as.character(out$uName[did]) 
+
+############################ Plot Trend
+timevec = 1:nrow(mout$B)
+S = mout$B %*% mout$beta
+f1 <- splinefun(timevec, S)
+T = length(timevec)
+plot(x= timevec, y= S, type="p", xlab="Time", ylab="S", lwd=2, font=titlefontSize, col="black",ylim=range(S), main="Trend")
+curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
+
+
+``` 
+
+Plot 
+
+```{r echo=TRUE }
+################################ predicted marker
+mout = out$rank2
+rownames(mout$prd) = out$uName 
+nid = which( abs(mout$a[,1]) >TH1)  
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = mout$prd[uid,]   
+plotHeatMap(da1, uWt[od], fz=20, title = "Predicted data gene rank 2") 
+ 
+x = out$x[,1,]
+rownames(x) = out$uName 
+nid = which( abs(mout$a[,1]) >TH1)   
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = x[uid,]   
+ 
+corS= apply(da1, 1, function(x) {cor(x, S2) }) 
+id  = which(abs(corS)>=corTH)
+cuWt = uWt[od]
+
+plotHeatMap(da1[id,], cuWt[id], fz=20, title = "Raw data gene rank 2") 
+
+kid = getMapId(rownames(da), rownames(da1[id,]))
+plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 2") 
+
+``` 
+
+
+
+## {-}  

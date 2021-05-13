@@ -1,0 +1,53 @@
+Package: FFT
+Type: Package
+Title: FFT
+Version: 0.1.0
+Author: Yang Chen
+Maintainer: Yang Chen <yancychy@gmail.com>
+Description: We propose a new method FFT,
+           a fast and flexible method for learning complex single-cell developmental trajectories  
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.1.0
+Depends:
+    R (>= 3.2.0),
+    ggplot2,
+    Rtsne,
+    igraph,
+    plotly, 
+    pdfCluster,
+    RANN,
+    flashClust,
+    dimRed, 
+    RColorBrewer,
+    pheatmap,
+    colorRamps,
+    RSpectra,
+    foreach,
+    doParallel,
+    e1071,
+    ggraph,
+    cluster,
+    umap,
+    leiden
+Imports:
+    Rtsne,
+    igraph,
+    plotly,
+    ggplot2,
+    pdfCluster,
+    RANN,
+    flashClust,
+    dimRed,
+    RColorBrewer,
+    pheatmap,
+    colorRamps,
+    RSpectra,
+    foreach,
+    doParallel,
+    e1071,
+    ggraph,
+    cluster,
+    umap,
+    leiden
