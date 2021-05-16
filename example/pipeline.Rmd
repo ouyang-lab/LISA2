@@ -20,14 +20,14 @@ library(FFT)
 library(PTA)
 library(leiden) 
 cluLeiden = NULL
-load("../../LISA2new/data/simulation_res.RData")
+load("../data/simulation_res.RData")
 ```
 
 ## Analysis pipeline {.tabset}
  
-### 1. PCA
-1. With normalized data as input, do PCA first
-2. We select top principle components (PCs): 
+### 1). PCA
+1. Users should use normalized data as input for PCA analysis pcaL1().
+2. Aooly getPCAN() function to automatically select top principle components (PCs): 
    (1) Compute the derivative of the standard deviations of the principal components.
    (2) Apply linear regression on the PC number and the derivative. Compute the squared error of the predicted derivative and input derivative. 
    (3) Compute the median value of the top 100 values in the predicted squared error.  
@@ -44,7 +44,7 @@ if(is.null(Z)){
 dim(Z) 
 ``` 
 
-### 2. UMAP
+### 2). UMAP
 Compute UMAP using the selected PCs.
 ```{r echo=TRUE }
 library(plotly)
@@ -54,15 +54,16 @@ if(is.null(uY)){
   emb2 <-  umap::umap(Z)
   uY = emb2$layout
 }
+
+### visualize the cell annotations in UMAP
 plotAlls(X=uY,draw=1, t=NULL, cluid=as.character(branch),
          type=2,size =6,opacity=1, titlename=paste0("UMAP: PC number = ", ncol(Z)))
 
 ```  
 
-### 3. Clustering
-1. We set k from 4 to 20 to build corresponding kNN graph
-2. For each kNN graph, we apply community detection (Leiden or Louvain) algorithm for clustering the cells
-3. User can visualize all clustering results in UMAP and select a proper clustering results
+### 3). Clustering
+1. Using different k size for building corresponding kNN graph for clustering with cmcluster(). 
+   For each kNN graph, apply community detection (Leiden or Louvain) algorithm for clustering.
 ```{r echo=TRUE }
 ks = seq(4,20, by=2)
 if(is.null(cluLeiden)){
@@ -76,7 +77,7 @@ if(is.null(cluLeiden)){
 }
 ``` 
 
-Plot clustering
+2. User can visualize the clustering results in UMAP and select a proper clustering results.
 
 ```{r echo=TRUE }
 lp <- htmltools::tagList()
@@ -90,7 +91,7 @@ for (i in 1:length(ks)) {
 lp
 ``` 
 
-### 4. Select a proper clustering
+### 4). Select a proper clustering
   
 ```{r echo=TRUE}
 k=5
@@ -100,22 +101,24 @@ plotAlls(X=uY,draw=1, t=NULL, cluid=as.character(cluid), type=2,size =6,opacity=
          titlename=paste("UMAP,k=", ks[k], sep=""))
 
 library("netbiov")
+## visualize the kNN graph
 plotCommNet(Z, ksize=ks[k], cluid, colname= rownames( brewer.pal.info)[12],
             gtype = "Kamada-Kawai", seedN = 1)
 
 ``` 
 
-### 5. Compuate L-ISOMAP
-1. Based on selected clustering, we build kNN graph from corresponding k size
-2. For each cluster, select the the cell which has most connections in kNN graph as landmark points.
-3. Build 3D L-ISOMAP based landmark points and kNN graph
+### 5). Compuate L-ISOMAP
+1. Based on selected clustering, we build kNN graph from corresponding k size.
+2. For each cluster, select the the cell which has most connections in kNN graph as landmark points use searchPeaks().
+3. Build 3D L-ISOMAP based landmark points and kNN graph with autoLISOMAP().
 ```{r echo=TRUE}  
 centid = getCluCenterID(Z, cluid)
 peakid = searchPeaks(gg=cluLeiden[[k]]$knng$g, cluid)
 X  <- autoLISOMAP(Z, peaks=peakid, ndim = 3, L1=NULL, L2=NULL, N=1)   
 ``` 
 
-Visualize 3D L-ISOMAP 
+Visualize cell annotation in 3D L-ISOMAP 
+
 ```{r echo=TRUE}  
 PZ = rbind(uY, uY[peakid,])
 pc = c(cluid, rep("peaks", length(peakid)))
@@ -126,15 +129,15 @@ plotAlls(X=PZ,draw=1, t=NULL, cluid=as.character(pc), type=2,size =6,opacity=1,
 plotAlls(X=X,draw=3, t=NULL, cluid=as.character(cluid), type=2,size =5,opacity=1, titlename="ISOMAP") 
 ``` 
 
-### 6. Trajectory anlysis 
+### 6). Trajectory anlysis 
 1. Calculate the neighbor distance matrix and graph distance matrix for the clusters based kNN graph.
 2. User can specify the root cluster and leaf clusters to build a spanning tree.
    User can organize the leaf structure by list format:
    For example: leaves=list(a=c(5,7,"parallel"), b=c(8,9,"parallel"), c=c(16,12,"linear"), d=10, f=4)
-   Here, cluster 5 and 7 are derived from cluster 3. Hence, they are parallel. 
-   cluster 8 and 9 are derived from cluster 11. Hence, they are parallel.
-   cluster 12 and 16 are linear connected,  Hence, they are linear.
-   cluster 10 and 4 are separated clusters.
+   Here, cluster 5 and 7 contain cells in branch 9 and 10, and they has same parent. Hence, they are parallel. 
+   cluster 8 and 9 contain cells in branch 6 and 5, and they has same parent. Hence, they are parallel.
+   cluster 12 and 16 contain cells from same branch 12. We set them a linear connected.
+   cluster 10 and 4 contain cells in branch 11 and 8. 
    
 ```{r echo=TRUE}
 ##1. Compute neighbor distance of clusters in graph built by PCA  
@@ -145,13 +148,13 @@ dsM = distGraphClu(Z, ksize=ks[k], cluid=cluid)
 
 
 ```{r echo=TRUE}
-rt = 2 # clu
+rt = 2 # set root cluster
 g1 = getMSTLeafRootISO_3(neigDist = msM, cenDist=dsM, cluid=cluid, L2=3, root=rt,
                          leaves=list(a=c(5,7,"parallel"), b=c(8,9,"parallel"),
                                      c=c(16,12,"linear"), d=10, f=4))
 ``` 
 
-### 7. Trajectory visualization 
+### 7). Trajectory visualization 
 1. User can visualize the trajectory by pie tree plot
 ```{r echo=TRUE}
 clucells = getCluCellTh(cluid=cluid, branch, th=0.2, subN=10)
@@ -189,8 +192,8 @@ plotCellTree(X=X, uY, cluid=cluid, mst=g3, root=rt, colorby="celltype", anno=ann
              vv=-1.2, colorName = "Paired")
 ```
 
-### 8. Trajectory pseudo time 
-1. User can compute pseudo time by trajectory
+### 8). Trajectory pseudo time 
+1. User can compute pseudo time based on the trajectory.
 ```{r echo=TRUE}
 rt = 2# root
 g2 <- set.vertex.attribute(g1$g5, "name", value= paste("Y_", 1:max(cluid),sep = ""))
@@ -200,7 +203,7 @@ res = simpPTime(Z, cluid=cluid,  cenTree=g2,  root=rt)
 
 ```
 
-2. User can visualize the pseudo time in UMAP 
+2. User can visualize the pseudo time in UMAP.
 
 ```{r echo=TRUE}
 plotAlls(X=uY,draw=1, t=res$pt, cluid=as.character(branch), type=1,size =6,opacity=1, titlename="UMAP")
@@ -209,7 +212,7 @@ plotAlls(X=uY,draw=1, t=res$pt, cluid=as.character(branch), type=1,size =6,opaci
 ```
 
 
-### 9. PTA analysis for each lineage 
+### 9). PTA analysis for each lineage 
 User can apply PTA for each lineage
 1. User should specify each lineage first as input of PTA
 2. To reduce the computation time, user can do average on the cells along the lineage
@@ -223,7 +226,7 @@ lpath5 = c(2,14,13,6,3,5)
 lpath6 = c(2,14,13,1,16,12)
 lpath7 = c(2,14,13,1,10)
 cluid = cluLeiden[[5]]$cluid
-fpath = "../../LISA2new/data/simu_PTA_lineage_1.RData"
+fpath = "../data/simu_PTA_lineage_1.RData"
 
 if(!file.exists(fpath)){ 
   usePTA(sd=daC, cluid=cluid, path=lpath1, pt = res$pt, fname=fpath,
@@ -233,7 +236,7 @@ if(!file.exists(fpath)){
 load(fpath)
 ```
 
-### 10. PTA Visulization in rank 1 in lineage c(2,15,11,9)
+### 10). PTA Visulization in rank 1 in lineage c(2,15,11,9)
  
 ```{r echo=TRUE}
 library(reshape2)
@@ -295,7 +298,7 @@ plotHeatMap <- function(da1,tv, fz=20, rowsize = 6, colsize=4,barsize=10, showRn
 
 ```
 
-
+1.Plot the main trends
 
 ```{r echo=TRUE}
 str="Main trends in simulation lineage 2->9" 
@@ -387,6 +390,8 @@ plot(x= timevec, y= S, type="p", xlab="Time", ylab="S", lwd=2, font=2, col="blac
 curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
 ```
 
+2.Plot gene expression heatmap ranked by PTA score.
+
 ```{r echo=TRUE }
 ################################ predicted marker
 mout = out
@@ -418,13 +423,13 @@ plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 
 ```  
 
 
-### 11. PTA Visulization in rank 2 in lineage c(2,15,11,9)
- 
+### 11). PTA Visulization in rank 2 in lineage c(2,15,11,9)
+1.Plot the main trends
 ```{r echo=TRUE }
 TH1 = 0.03
 mout = out$rank2
 
-############################ plot loadings
+############################ plot the main trends
 PTA.plotCV(out$err2,feature.flag = feature.flag)
  
 plot(mout$a[,1],type="p", xlab="genes", ylab="a", lwd=2, font=titlefontSize)
@@ -455,7 +460,8 @@ curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
 
 ``` 
 
-Plot 
+
+2.Plot gene expression heatmap ranked by PTA score.
 
 ```{r echo=TRUE }
 ################################ predicted marker
@@ -486,7 +492,5 @@ kid = getMapId(rownames(da), rownames(da1[id,]))
 plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 2") 
 
 ``` 
-
-
 
 ## {-}  
