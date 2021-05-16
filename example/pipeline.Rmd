@@ -334,7 +334,7 @@ ymax = max(c(S1,S2,S3))
 vmax = max(max1, max2, max3)
 vmin = min(min1, min2, min3) 
 
-if(1==0){
+if(1==1){
   plot(x= timevec, y= S1, ylim=c(ymin, ymax), type="p", xlab="Time", ylab="S", lwd=2, font=2, col="black", main= str, cex.main= titlefontSize)
 curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
 
@@ -493,4 +493,74 @@ plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 
 
 ``` 
 
+### 12). PTA Visulization in rank 3 in lineage c(2,15,11,9)
+
+1.Plot the main trends
+```{r echo=TRUE }
+TH1 = 0.03
+mout = out$rank3
+
+############################ plot the main trends
+PTA.plotCV(out$err3,feature.flag = feature.flag)
+ 
+plot(mout$a[,1],type="p", xlab="genes", ylab="a", lwd=2, font=titlefontSize)
+ 
+na <- c(length(mout$a[mout$a>TH1]), length(mout$a[mout$a<-TH1]),length(mout$a[abs(mout$a)<TH1]) ) 
+names(na) = c(paste('a>',TH1),
+              paste('a<',-TH1),
+              paste('|a|<',TH1) )
+na
+
+
+gid = 1:length(mout$a)
+uid = gid[mout$a>TH1]
+did = gid[mout$a<-TH1]
+ 
+# up and down expressed marker genes 
+upgene2 = as.character(out$uName[uid])
+downgene2 = as.character(out$uName[did]) 
+
+############################ Plot Trend
+timevec = 1:nrow(mout$B)
+S = mout$B %*% mout$beta
+f1 <- splinefun(timevec, S)
+T = length(timevec)
+plot(x= timevec, y= S, type="p", xlab="Time", ylab="S", lwd=2, font=titlefontSize, col="black",ylim=range(S), main="Trend")
+curve(f1(x), from=timevec[1], to=timevec[T], col="red", lty=1,lwd=2, add=TRUE)
+
+
+``` 
+
+
+2.Plot gene expression heatmap ranked by PTA score.
+
+```{r echo=TRUE }
+################################ predicted marker
+mout = out$rank3
+rownames(mout$prd) = out$uName 
+nid = which( abs(mout$a[,1]) >TH1)  
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = mout$prd[uid,]   
+plotHeatMap(da1, uWt[od], fz=20, title = "Predicted data gene rank 3") 
+ 
+x = out$x[,1,]
+rownames(x) = out$uName 
+nid = which( abs(mout$a[,1]) >TH1)   
+uWt = mout$a[nid,1] 
+od = order(uWt,decreasing = TRUE) 
+uid = nid[od] 
+da1 = x[uid,]   
+ 
+corS= apply(da1, 1, function(x) {cor(x, S2) }) 
+id  = which(abs(corS)>=corTH)
+cuWt = uWt[od]
+
+plotHeatMap(da1[id,], cuWt[id], fz=20, title = "Raw data gene rank 3") 
+
+kid = getMapId(rownames(da), rownames(da1[id,]))
+plotHeatMap(da[kid,], cuWt[id], fz=20, showRname=T, title = "Raw data gene rank 3") 
+
+``` 
 ## {-}  
