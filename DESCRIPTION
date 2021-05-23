@@ -1,15 +1,15 @@
-Package: FFT
+Package: LSIA2
 Type: Package
-Title: FFT
+Title: LSIA2
 Version: 0.1.0
 Author: Yang Chen
 Maintainer: Yang Chen <yancychy@gmail.com>
-Description: We propose a new method FFT,
+Description: We propose a new method LSIA2,
            a fast and flexible method for learning complex single-cell developmental trajectories  
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 6.1.0
+RoxygenNote: 7.1.1
 Depends:
     R (>= 3.2.0),
     ggplot2,
