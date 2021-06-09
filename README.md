@@ -1,8 +1,8 @@
 # LISA2
-A R package for single cell RNA-seq trajectory inference 
+An R package for single cell RNA-seq trajectory inference 
 
 ### Install
-User can install the R package in Rstudio
+User can install the R package in Rstudio.
 
 ### Data
   The simulation dataset is from   https://github.com/soedinglab/prosstt/blob/master/examples/many_branches_cells.ipynb.  
