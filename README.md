@@ -1,5 +1,5 @@
 # LISA2
-An R package for single cell RNA-seq trajectory inference 
+An R package for learning complex single cell trajectory and expression trends
 
 ### Install
 User can install the R package in Rstudio.
