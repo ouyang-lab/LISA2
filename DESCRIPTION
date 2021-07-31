@@ -1,10 +1,10 @@
-Package: LSIA2
+Package: LISA2
 Type: Package
-Title: LSIA2
+Title: LISA2
 Version: 0.1.0
 Author: Yang Chen
 Maintainer: Yang Chen <yancychy@gmail.com>
-Description: We propose a new method LSIA2,
+Description: We propose a new method LISA2,
            a fast and flexible method for learning complex single-cell developmental trajectories  
 License: GPL-3
 Encoding: UTF-8
